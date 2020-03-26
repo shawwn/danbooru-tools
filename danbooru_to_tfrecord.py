@@ -61,94 +61,18 @@ from google.cloud import storage
 flags.DEFINE_string(
     'project', None, 'Google cloud project id for uploading the dataset.')
 flags.DEFINE_string(
-    'gcs_output_path', None, 'GCS path for uploading the dataset.')
-flags.DEFINE_string(
     'local_scratch_dir', None, 'Scratch directory path for temporary files.')
 flags.DEFINE_string(
-    'raw_data_dir', None, 'Directory path for raw Imagenet dataset. '
-    'Should have train and validation subdirectories inside it.')
-flags.DEFINE_string(
-    'imagenet_username', None, 'Username for Imagenet.org account')
-flags.DEFINE_string(
-    'imagenet_access_key', None, 'Access Key for Imagenet.org account')
-flags.DEFINE_boolean(
-    'gcs_upload', True, 'Set to false to not upload to gcs.')
+    'raw_data_dir', None, 'Directory path for raw Danbooru dataset. ')
 
 FLAGS = flags.FLAGS
 
-BASE_URL = 'http://www.image-net.org/challenges/LSVRC/2012/nnoupb/'
-LABELS_URL = 'https://raw.githubusercontent.com/tensorflow/models/master/research/inception/inception/data/imagenet_2012_validation_synset_labels.txt'  # pylint: disable=line-too-long
-
-TRAINING_FILE = 'ILSVRC2012_img_train.tar'
-VALIDATION_FILE = 'ILSVRC2012_img_val.tar'
-LABELS_FILE = 'synset_labels.txt'
-
-TRAINING_SHARDS = 1024
-VALIDATION_SHARDS = 128
-
-TRAINING_DIRECTORY = 'train'
-VALIDATION_DIRECTORY = 'validation'
-
+TRAINING_SHARDS = 2048
 
 def _check_or_create_dir(directory):
   """Check if directory exists otherwise create it."""
   if not tf.gfile.Exists(directory):
     tf.gfile.MakeDirs(directory)
-
-
-def download_dataset(raw_data_dir):
-  """Download the Imagenet dataset into the temporary directory."""
-  def _download(url, filename):
-    """Download the dataset at the provided filepath."""
-    urllib.urlretrieve(url, filename)
-
-  def _get_members(filename):
-    """Get all members of a tarfile."""
-    tar = tarfile.open(filename)
-    members = tar.getmembers()
-    tar.close()
-    return members
-
-  def _untar_file(filename, directory, member=None):
-    """Untar a file at the provided directory path."""
-    _check_or_create_dir(directory)
-    tar = tarfile.open(filename)
-    if member is None:
-      tar.extractall(path=directory)
-    else:
-      tar.extract(member, path=directory)
-    tar.close()
-
-  # Check if raw_data_dir exists
-  _check_or_create_dir(raw_data_dir)
-
-  # Download the training data
-  tf.logging.info('Downloading the training set. This may take a few hours.')
-  directory = os.path.join(raw_data_dir, TRAINING_DIRECTORY)
-  filename = os.path.join(raw_data_dir, TRAINING_FILE)
-  _download(BASE_URL + TRAINING_FILE, filename)
-
-  # The training tarball contains multiple tar balls inside it. Extract them
-  # in order to create a clean directory structure.
-  for member in _get_members(filename):
-    subdirectory = os.path.join(directory, member.name.split('.')[0])
-    sub_tarfile = os.path.join(subdirectory, member.name)
-
-    _untar_file(filename, subdirectory, member)
-    _untar_file(sub_tarfile, subdirectory)
-    os.remove(sub_tarfile)
-
-  # Download synset_labels for validation set
-  tf.logging.info('Downloading the validation labels.')
-  _download(LABELS_URL, os.path.join(raw_data_dir, LABELS_FILE))
-
-  # Download the validation data
-  tf.logging.info('Downloading the validation set. This may take a few hours.')
-  directory = os.path.join(raw_data_dir, VALIDATION_DIRECTORY)
-  filename = os.path.join(raw_data_dir, VALIDATION_FILE)
-  _download(BASE_URL + VALIDATION_FILE, filename)
-  _untar_file(filename, directory)
-
 
 def _int64_feature(value):
   """Wrapper for inserting int64 features into Example proto."""
@@ -206,9 +130,7 @@ def _is_png(filename):
   Returns:
     boolean indicating if the image is a PNG.
   """
-  # File list from:
-  # https://github.com/cytsai/ilsvrc-cmyk-image-list
-  return 'n02105855_2933.JPEG' in filename
+  return filename.lower().endswith('.png')
 
 
 def _is_cmyk(filename):
@@ -309,22 +231,22 @@ def _process_image(filename, coder):
 
   return image_data, height, width
 
-
-def _process_image_files_batch(coder, output_file, filenames, synsets, labels):
+def _process_image_files_batch(coder, output_file, filenames, labels):
   """Processes and saves list of images as TFRecords.
 
   Args:
     coder: instance of ImageCoder to provide TensorFlow image coding utils.
     output_file: string, unique identifier specifying the data set
     filenames: list of strings; each string is a path to an image file
-    synsets: list of strings; each string is a unique WordNet ID
     labels: map of string to integer; id for all synset labels
   """
   writer = tf.python_io.TFRecordWriter(output_file)
 
-  for filename, synset in tqdm.tqdm(list(zip(filenames, synsets))):
+  for filename in tqdm.tqdm(list(filenames)):
     image_buffer, height, width = _process_image(filename, coder)
-    label = labels[synset]
+    #label = labels[synset]
+    synset = b''
+    label = 0
     example = _convert_to_example(filename, image_buffer, label,
                                   synset, height, width)
     writer.write(example.SerializeToString())
@@ -332,13 +254,11 @@ def _process_image_files_batch(coder, output_file, filenames, synsets, labels):
   writer.close()
 
 
-def _process_dataset(filenames, synsets, labels, output_directory, prefix,
-                     num_shards):
+def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
   """Processes and saves list of images as TFRecords.
 
   Args:
     filenames: list of strings; each string is a path to an image file
-    synsets: list of strings; each string is a unique WordNet ID
     labels: map of string to integer; id for all synset labels
     output_directory: path where output files should be created
     prefix: string; prefix for each file
@@ -355,11 +275,9 @@ def _process_dataset(filenames, synsets, labels, output_directory, prefix,
 
   for shard in tqdm.tqdm([_ for _ in range(num_shards)]):
     chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
-    chunk_synsets = synsets[shard * chunksize : (shard + 1) * chunksize]
     output_file = os.path.join(
         output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
-    _process_image_files_batch(coder, output_file, chunk_files,
-                               chunk_synsets, labels)
+    _process_image_files_batch(coder, output_file, chunk_files, labels)
     tf.logging.info('Finished writing file: %s' % output_file)
     files.append(output_file)
   return files
@@ -379,110 +297,31 @@ def convert_to_tf_records(raw_data_dir):
 
   # Glob all the training files
   tf.logging.info('Glob all the training files.')
-  training_files = tf.gfile.Glob(
-      os.path.join(raw_data_dir, TRAINING_DIRECTORY, '*', '*.JPEG'))
-
-  # Get training file synset labels from the directory name
-  tf.logging.info('Get training file synset labels from the directory name.')
-  training_synsets = [
-      os.path.basename(os.path.dirname(f)) for f in training_files]
+  training_files = []
+  training_files.extend(tf.gfile.Glob(
+      os.path.join(raw_data_dir, '*', '*.jpg')))
+  training_files.extend(tf.gfile.Glob(
+      os.path.join(raw_data_dir, '*', '*.png')))
 
   training_shuffle_idx = make_shuffle_idx(len(training_files))
   training_files = [training_files[i] for i in training_shuffle_idx]
-  training_synsets = [training_synsets[i] for i in training_shuffle_idx]
 
-  # Glob all the validation files
-  tf.logging.info('Glob all the validation files.')
-  validation_files = sorted(tf.gfile.Glob(
-      os.path.join(raw_data_dir, VALIDATION_DIRECTORY, '*.JPEG')))
-
-  # Get validation file synset labels from labels.txt
-  tf.logging.info('Get validation file synset labels from labels.txt')
-  validation_synsets = tf.gfile.FastGFile(
-      os.path.join(raw_data_dir, LABELS_FILE), 'r').read().splitlines()
-
-  # Create unique ids for all synsets
-  tf.logging.info('Create unique ids for all synsets.')
-  labels = {v: k + 1 for k, v in enumerate(
-      sorted(set(validation_synsets + training_synsets)))}
+  labels = {}
 
   # Create training data
   tf.logging.info('Processing the training data.')
-  training_records = _process_dataset(
-      training_files, training_synsets, labels,
-      os.path.join(FLAGS.local_scratch_dir, TRAINING_DIRECTORY),
-      TRAINING_DIRECTORY, TRAINING_SHARDS)
+  training_records = _process_dataset(training_files, labels, FLAGS.local_scratch_dir, 'danbooru2019', TRAINING_SHARDS)
 
-  # Create validation data
-  tf.logging.info('Processing the validation data.')
-  validation_records = _process_dataset(
-      validation_files, validation_synsets, labels,
-      os.path.join(FLAGS.local_scratch_dir, VALIDATION_DIRECTORY),
-      VALIDATION_DIRECTORY, VALIDATION_SHARDS)
-
-  return training_records, validation_records
-
-
-def upload_to_gcs(training_records, validation_records):
-  """Upload TF-Record files to GCS, at provided path."""
-
-  # Find the GCS bucket_name and key_prefix for dataset files
-  path_parts = FLAGS.gcs_output_path[5:].split('/', 1)
-  bucket_name = path_parts[0]
-  if len(path_parts) == 1:
-    key_prefix = ''
-  elif path_parts[1].endswith('/'):
-    key_prefix = path_parts[1]
-  else:
-    key_prefix = path_parts[1] + '/'
-
-  client = storage.Client(project=FLAGS.project)
-  bucket = client.get_bucket(bucket_name)
-
-  def _upload_files(filenames):
-    """Upload a list of files into a specifc subdirectory."""
-    for i, filename in enumerate(sorted(filenames)):
-      blob = bucket.blob(key_prefix + os.path.basename(filename))
-      blob.upload_from_filename(filename)
-      if not i % 20:
-        tf.logging.info('Finished uploading file: %s' % filename)
-
-  # Upload training dataset
-  tf.logging.info('Uploading the training data.')
-  _upload_files(training_records)
-
-  # Upload validation dataset
-  tf.logging.info('Uploading the validation data.')
-  _upload_files(validation_records)
-
+  return training_records
 
 def main(argv):  # pylint: disable=unused-argument
   tf.logging.set_verbosity(tf.logging.INFO)
 
-  if FLAGS.gcs_upload and FLAGS.project is None:
-    raise ValueError('GCS Project must be provided.')
-
-  if FLAGS.gcs_upload and FLAGS.gcs_output_path is None:
-    raise ValueError('GCS output path must be provided.')
-  elif FLAGS.gcs_upload and not FLAGS.gcs_output_path.startswith('gs://'):
-    raise ValueError('GCS output path must start with gs://')
-
   if FLAGS.local_scratch_dir is None:
     raise ValueError('Scratch directory path must be provided.')
 
-  # Download the dataset if it is not present locally
-  raw_data_dir = FLAGS.raw_data_dir
-  if raw_data_dir is None:
-    raw_data_dir = os.path.join(FLAGS.local_scratch_dir, 'raw_data')
-    tf.logging.info('Downloading data to raw_data_dir: %s' % raw_data_dir)
-    download_dataset(raw_data_dir)
-
   # Convert the raw data into tf-records
   training_records, validation_records = convert_to_tf_records(raw_data_dir)
-
-  # Upload to GCS
-  if FLAGS.gcs_upload:
-    upload_to_gcs(training_records, validation_records)
 
 
 if __name__ == '__main__':
