@@ -321,7 +321,7 @@ def main(argv):  # pylint: disable=unused-argument
     raise ValueError('Scratch directory path must be provided.')
 
   # Convert the raw data into tf-records
-  training_records, validation_records = convert_to_tf_records(raw_data_dir)
+  training_records, validation_records = convert_to_tf_records(FLAGS.raw_data_dir)
 
 
 if __name__ == '__main__':
