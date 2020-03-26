@@ -63,7 +63,9 @@ flags.DEFINE_string(
 flags.DEFINE_string(
     'local_scratch_dir', None, 'Scratch directory path for temporary files.')
 flags.DEFINE_string(
-    'raw_data_dir', None, 'Directory path for raw Danbooru dataset. ')
+    'raw_data_dir', None, 'Directory path for raw Danbooru dataset.')
+flags.DEFINE_string(
+    'dataset_name', 'danbooru2019', 'tfrecord prefix.')
 
 FLAGS = flags.FLAGS
 
@@ -271,6 +273,10 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
   chunksize = int(math.ceil(len(filenames) / num_shards))
   coder = ImageCoder()
 
+  with open(os.path.join(output_directory, '%s-filenames.txt' % prefix), 'w') as f:
+    for filename in filenames:
+      f.write(filename + '\n')
+
   files = []
 
   for shard in tqdm.tqdm([_ for _ in range(num_shards)]):
@@ -310,7 +316,7 @@ def convert_to_tf_records(raw_data_dir):
 
   # Create training data
   tf.logging.info('Processing the training data.')
-  training_records = _process_dataset(training_files, labels, FLAGS.local_scratch_dir, 'danbooru2019', TRAINING_SHARDS)
+  training_records = _process_dataset(training_files, labels, FLAGS.local_scratch_dir, FLAGS.dataset_name, TRAINING_SHARDS)
 
   return training_records
 
