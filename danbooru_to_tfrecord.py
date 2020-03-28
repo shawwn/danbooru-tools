@@ -245,13 +245,17 @@ def _process_image_files_batch(coder, output_file, filenames, labels):
   writer = tf.python_io.TFRecordWriter(output_file)
 
   for filename in tqdm.tqdm(list(filenames)):
-    image_buffer, height, width = _process_image(filename, coder)
-    #label = labels[synset]
-    synset = b''
-    label = 0
-    example = _convert_to_example(filename, image_buffer, label,
-                                  synset, height, width)
-    writer.write(example.SerializeToString())
+    try:
+      image_buffer, height, width = _process_image(filename, coder)
+      #label = labels[synset]
+      synset = b''
+      label = 0
+      example = _convert_to_example(filename, image_buffer, label,
+                                    synset, height, width)
+      writer.write(example.SerializeToString())
+    except:
+      import traceback
+      traceback.print_exc()
 
   writer.close()
 
