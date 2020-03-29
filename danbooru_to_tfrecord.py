@@ -332,7 +332,8 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
     chunks = shards(list(range(num_shards)), 8)
     def thunk(shards):
       return process_shards(shards, 8)
-    pool.imap_unordered(thunk, chunks)
+    for files in pool.imap_unordered(thunk, chunks):
+      pass
 
 def convert_to_tf_records():
   """Convert the Imagenet dataset into TF-Record dumps."""
