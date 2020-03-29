@@ -59,13 +59,13 @@ import tensorflow.compat.v1 as tf
 from google.cloud import storage
 
 flags.DEFINE_string(
-    'project', None, 'Google cloud project id for uploading the dataset.')
+    'out', None, 'tfrecord output path.')
 flags.DEFINE_string(
-    'local_scratch_dir', None, 'Scratch directory path for temporary files.')
-flags.DEFINE_string(
-    'dataset_name', None, 'tfrecord prefix.')
+    'name', None, 'tfrecord prefix. E.g. --name danbooru2019')
 flags.DEFINE_list(
-    'glob', None, 'Comma-separated paths to glob.')
+    'glob', None, 'Comma-separated glob patterns. E.g. --glob "data/images/*/*.jpg"')
+flags.DEFINE_integer(
+    'shards', 2048, 'Number of tfrecord files to generate')
 
 FLAGS = flags.FLAGS
 
@@ -319,18 +319,18 @@ def convert_to_tf_records():
 
   # Create training data
   tf.logging.info('Processing the training data.')
-  training_records = _process_dataset(training_files, labels, FLAGS.local_scratch_dir, FLAGS.dataset_name, TRAINING_SHARDS)
+  training_records = _process_dataset(training_files, labels, FLAGS.out, FLAGS.name, TRAINING_SHARDS)
 
   return training_records
 
 def main(argv):  # pylint: disable=unused-argument
   tf.logging.set_verbosity(tf.logging.INFO)
 
-  if FLAGS.dataset_name is None:
-    raise ValueError('--dataset_name must be provided. e.g. danbooru2019-s')
+  if FLAGS.name is None:
+    raise ValueError('--name must be provided. e.g. --name danbooru2019-s')
 
-  if FLAGS.local_scratch_dir is None:
-    raise ValueError('--local_scratch_dir must be provided. e.g. out/')
+  if FLAGS.out is None:
+    raise ValueError('--out must be provided. e.g. --out out/')
 
   if len(FLAGS.glob) <= 0:
     raise ValueError('Must specify at least one --glob pattern. Eg. --glob "data/*/*.jpg"')
