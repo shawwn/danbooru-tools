@@ -262,6 +262,8 @@ def _process_image_files_batch(coder, output_file, filenames, labels):
   if writer is not None:
     writer.close()
 
+  return writer is not None
+
 
 def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
   """Processes and saves list of images as TFRecords.
@@ -286,12 +288,15 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
 
   files = []
 
-  for shard in tqdm.tqdm([_ for _ in range(num_shards)], desc=output_file):
-    chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
-    output_file = os.path.join(
-        output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
-    _process_image_files_batch(coder, output_file, chunk_files, labels)
-    files.append(output_file)
+  with tqdm.tqdm(total=num_shards) as pbar:
+    for shard in range(num_shards):
+      chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
+      output_file = os.path.join(
+          output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
+      pbar.set_description(output_file)
+      if _process_image_files_batch(coder, output_file, chunk_files, labels):
+        files.append(output_file)
+      pbar.update(1)
   return files
 
 
