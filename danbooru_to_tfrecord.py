@@ -313,10 +313,10 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
     for filename in filenames:
       f.write(filename + '\n')
 
-  def process_shards(shards):
+  def process_shards(shards, worker_count):
     files = []
 
-    with tqdm.tqdm(total=len(filenames)) as pbar:
+    with tqdm.tqdm(total=len(filenames) // worker_count) as pbar:
       for shard in shards:
         chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
         output_file = os.path.join(
@@ -328,7 +328,7 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
 
   chunks = shards(list(range(num_shards)), 8)
   for chunk in chunks:
-    process_shards(chunk)
+    process_shards(chunk, 8)
 
 
 def convert_to_tf_records():
