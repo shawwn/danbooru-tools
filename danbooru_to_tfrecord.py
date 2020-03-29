@@ -58,6 +58,8 @@ import tensorflow.compat.v1 as tf
 
 from google.cloud import storage
 
+from multiprocessing import Pool
+
 flags.DEFINE_string(
     'out', None, 'tfrecord output path.')
 flags.DEFINE_string(
@@ -326,10 +328,11 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
           files.append(output_file)
     return files
 
-  chunks = shards(list(range(num_shards)), 8)
-  for chunk in chunks:
-    process_shards(chunk, 8)
-
+  with Pool(processes=8, initializer=get_coder) as pool:
+    chunks = shards(list(range(num_shards)), 8)
+    def thunk(shards):
+      return process_shards(shards, 8)
+    pool.imap_unordered(thunk, chunks)
 
 def convert_to_tf_records():
   """Convert the Imagenet dataset into TF-Record dumps."""
