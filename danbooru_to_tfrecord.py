@@ -255,7 +255,9 @@ def _process_image_files_batch(coder, output_file, filenames, labels):
       if writer is None:
         writer = tf.python_io.TFRecordWriter(output_file)
       writer.write(example.SerializeToString())
-    except:
+    except Exception as e:
+      if isinstance(e, KeyboardInterrupt):
+        break
       import traceback
       traceback.print_exc()
 
