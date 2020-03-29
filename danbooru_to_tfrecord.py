@@ -242,7 +242,7 @@ def _process_image_files_batch(coder, output_file, filenames, labels):
     filenames: list of strings; each string is a path to an image file
     labels: map of string to integer; id for all synset labels
   """
-  writer = tf.python_io.TFRecordWriter(output_file)
+  writer = None
 
   for filename in tqdm.tqdm(list(filenames)):
     try:
@@ -252,12 +252,15 @@ def _process_image_files_batch(coder, output_file, filenames, labels):
       label = 0
       example = _convert_to_example(filename, image_buffer, label,
                                     synset, height, width)
+      if writer is None:
+        writer = tf.python_io.TFRecordWriter(output_file)
       writer.write(example.SerializeToString())
     except:
       import traceback
       traceback.print_exc()
 
-  writer.close()
+  if writer is not None:
+    writer.close()
 
 
 def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
