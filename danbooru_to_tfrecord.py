@@ -196,6 +196,11 @@ class ImageCoder(object):
     assert image.shape[2] == 3
     return image
 
+def get_coder():
+  global g_coder
+  if g_coder is None:
+    g_coder = ImageCoder()
+  return g_coder
 
 def _process_image(filename, coder):
   """Process a single image file.
@@ -233,7 +238,7 @@ def _process_image(filename, coder):
 
   return image_data, height, width
 
-def _process_image_files_batch(coder, output_file, filenames, labels, pbar=None):
+def _process_image_files_batch(output_file, filenames, labels, pbar=None, coder=None):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -243,6 +248,9 @@ def _process_image_files_batch(coder, output_file, filenames, labels, pbar=None)
     labels: map of string to integer; id for all synset labels
   """
   writer = None
+
+  if coder is None:
+    coder = get_coder()
 
   for filename in filenames:
     try:
@@ -285,7 +293,6 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
   """
   _check_or_create_dir(output_directory)
   chunksize = int(math.ceil(len(filenames) / num_shards))
-  coder = ImageCoder()
 
   with open(os.path.join(output_directory, '%s-filenames.txt' % prefix), 'w') as f:
     for filename in filenames:
@@ -299,7 +306,7 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
       output_file = os.path.join(
           output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
       pbar.set_description(output_file)
-      if _process_image_files_batch(coder, output_file, chunk_files, labels, pbar):
+      if _process_image_files_batch(output_file, chunk_files, labels, pbar):
         files.append(output_file)
   return files
 
