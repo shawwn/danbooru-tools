@@ -233,7 +233,7 @@ def _process_image(filename, coder):
 
   return image_data, height, width
 
-def _process_image_files_batch(coder, output_file, filenames, labels):
+def _process_image_files_batch(coder, output_file, filenames, labels, pbar=None):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -260,6 +260,9 @@ def _process_image_files_batch(coder, output_file, filenames, labels):
         break
       import traceback
       traceback.print_exc()
+    finally:
+      if pbar is not None:
+        pbar.update(1)
 
   if writer is not None:
     writer.close()
@@ -290,15 +293,14 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
 
   files = []
 
-  with tqdm.tqdm(total=num_shards) as pbar:
+  with tqdm.tqdm(total=len(filenames)) as pbar:
     for shard in range(num_shards):
       chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
       output_file = os.path.join(
           output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
       pbar.set_description(output_file)
-      if _process_image_files_batch(coder, output_file, chunk_files, labels):
+      if _process_image_files_batch(coder, output_file, chunk_files, labels, pbar):
         files.append(output_file)
-      pbar.update(1)
   return files
 
 
