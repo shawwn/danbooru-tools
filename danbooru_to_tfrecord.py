@@ -244,7 +244,7 @@ def _process_image_files_batch(coder, output_file, filenames, labels):
   """
   writer = None
 
-  for filename in tqdm.tqdm(list(filenames)):
+  for filename in filenames:
     try:
       image_buffer, height, width = _process_image(filename, coder)
       #label = labels[synset]
