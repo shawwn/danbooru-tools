@@ -300,17 +300,22 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
     for filename in filenames:
       f.write(filename + '\n')
 
-  files = []
+  all_shards = list(range(num_shards))
 
-  with tqdm.tqdm(total=len(filenames)) as pbar:
-    for shard in range(num_shards):
-      chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
-      output_file = os.path.join(
-          output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
-      pbar.set_description(output_file)
-      if _process_image_files_batch(output_file, chunk_files, labels, pbar):
-        files.append(output_file)
-  return files
+  def process_shards(shards):
+    files = []
+
+    with tqdm.tqdm(total=len(filenames)) as pbar:
+      for shard in shards:
+        chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
+        output_file = os.path.join(
+            output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
+        pbar.set_description(output_file)
+        if _process_image_files_batch(output_file, chunk_files, labels, pbar):
+          files.append(output_file)
+    return files
+
+  process_shards(all_shards)
 
 
 def convert_to_tf_records():
