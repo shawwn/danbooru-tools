@@ -63,9 +63,9 @@ flags.DEFINE_string(
 flags.DEFINE_string(
     'local_scratch_dir', None, 'Scratch directory path for temporary files.')
 flags.DEFINE_string(
-    'raw_data_dir', None, 'Directory path for raw Danbooru dataset.')
-flags.DEFINE_string(
-    'dataset_name', 'danbooru2019', 'tfrecord prefix.')
+    'dataset_name', None, 'tfrecord prefix.')
+flags.DEFINE_list(
+    'glob', None, 'Comma-separated paths to glob.')
 
 FLAGS = flags.FLAGS
 
@@ -308,10 +308,9 @@ def convert_to_tf_records(raw_data_dir):
   # Glob all the training files
   tf.logging.info('Glob all the training files.')
   training_files = []
-  training_files.extend(tf.gfile.Glob(
-      os.path.join(raw_data_dir, '*', '*.jpg')))
-  training_files.extend(tf.gfile.Glob(
-      os.path.join(raw_data_dir, '*', '*.png')))
+  for pattern in FLAGS.glob:
+    training_files.extend(tf.gfile.Glob(pattern))
+  assert len(training_files) > 0
 
   training_shuffle_idx = make_shuffle_idx(len(training_files))
   training_files = [training_files[i] for i in training_shuffle_idx]
@@ -327,8 +326,14 @@ def convert_to_tf_records(raw_data_dir):
 def main(argv):  # pylint: disable=unused-argument
   tf.logging.set_verbosity(tf.logging.INFO)
 
+  if FLAGS.dataset_name is None:
+    raise ValueError('--dataset_name must be provided. e.g. danbooru2019-s')
+
   if FLAGS.local_scratch_dir is None:
-    raise ValueError('Scratch directory path must be provided.')
+    raise ValueError('--local_scratch_dir must be provided. e.g. out/')
+
+  if len(FLAGS.glob) <= 0:
+    raise ValueError('Must specify at least one --glob pattern. Eg. --glob "data/*/*.jpg"')
 
   # Convert the raw data into tf-records
   training_records = convert_to_tf_records(FLAGS.raw_data_dir)
