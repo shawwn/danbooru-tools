@@ -293,7 +293,7 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
   return files
 
 
-def convert_to_tf_records(raw_data_dir):
+def convert_to_tf_records():
   """Convert the Imagenet dataset into TF-Record dumps."""
 
   # Shuffle training records to ensure we are distributing classes
@@ -336,7 +336,7 @@ def main(argv):  # pylint: disable=unused-argument
     raise ValueError('Must specify at least one --glob pattern. Eg. --glob "data/*/*.jpg"')
 
   # Convert the raw data into tf-records
-  training_records = convert_to_tf_records(FLAGS.raw_data_dir)
+  training_records = convert_to_tf_records()
 
 
 if __name__ == '__main__':
