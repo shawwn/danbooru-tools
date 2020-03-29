@@ -295,6 +295,7 @@ def shards(l, n):
 
 def _process_shards(filenames, output_directory, prefix, shards, num_shards, worker_count):
   files = []
+  chunksize = int(math.ceil(len(filenames) / num_shards))
 
   with tqdm.tqdm(total=len(filenames) // worker_count) as pbar:
     for shard in shards:
@@ -320,7 +321,6 @@ def _process_dataset(filenames, output_directory, prefix, num_shards, labels=Non
     files: list of tf-record filepaths created from processing the dataset.
   """
   _check_or_create_dir(output_directory)
-  chunksize = int(math.ceil(len(filenames) / num_shards))
 
   with open(os.path.join(output_directory, '%s-filenames.txt' % prefix), 'w') as f:
     for filename in filenames:
