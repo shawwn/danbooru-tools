@@ -196,6 +196,8 @@ class ImageCoder(object):
     assert image.shape[2] == 3
     return image
 
+g_coder = None
+
 def get_coder():
   global g_coder
   if g_coder is None:
