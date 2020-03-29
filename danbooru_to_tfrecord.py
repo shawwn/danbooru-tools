@@ -71,8 +71,6 @@ flags.DEFINE_integer(
 
 FLAGS = flags.FLAGS
 
-TRAINING_SHARDS = 2048
-
 def _check_or_create_dir(directory):
   """Check if directory exists otherwise create it."""
   if not tf.gfile.Exists(directory):
@@ -354,11 +352,9 @@ def convert_to_tf_records():
   training_shuffle_idx = make_shuffle_idx(len(training_files))
   training_files = [training_files[i] for i in training_shuffle_idx]
 
-  labels = {}
-
   # Create training data
   tf.logging.info('Processing the training data.')
-  training_records = _process_dataset(training_files, labels, FLAGS.out, FLAGS.name, TRAINING_SHARDS)
+  training_records = _process_dataset(training_files, FLAGS.out, FLAGS.name, FLAGS.shards)
 
   return training_records
 
