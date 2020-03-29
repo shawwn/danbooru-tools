@@ -280,6 +280,19 @@ def _process_image_files_batch(output_file, filenames, labels, pbar=None, coder=
   return writer is not None
 
 
+def tuples(l, n=2):
+  r = []
+  for i in range(0, len(l), n):
+    r.append(l[i:i+n])
+  return r
+
+def shards(l, n):
+  r = [[] for _ in range(n)]
+  for v in tuples(l, n):
+    for i, x in enumerate(v):
+      r[i].append(x)
+  return r
+
 def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
   """Processes and saves list of images as TFRecords.
 
@@ -300,8 +313,6 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
     for filename in filenames:
       f.write(filename + '\n')
 
-  all_shards = list(range(num_shards))
-
   def process_shards(shards):
     files = []
 
@@ -315,7 +326,9 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
           files.append(output_file)
     return files
 
-  process_shards(all_shards)
+  chunks = shards(list(range(num_shards)), 8)
+  for chunk in chunks:
+    process_shards(chunk)
 
 
 def convert_to_tf_records():
