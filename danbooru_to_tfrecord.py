@@ -242,7 +242,7 @@ def _process_image(filename, coder):
 
   return image_data, height, width
 
-def _process_image_files_batch(output_file, filenames, labels, pbar=None, coder=None):
+def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, coder=None):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -295,7 +295,20 @@ def shards(l, n):
       r[i].append(x)
   return r
 
-def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
+def _process_shards(filenames, output_directory, prefix, shards, num_shards, worker_count):
+  files = []
+
+  with tqdm.tqdm(total=len(filenames) // worker_count) as pbar:
+    for shard in shards:
+      chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
+      output_file = os.path.join(
+          output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
+      pbar.set_description(output_file)
+      if _process_image_files_batch(output_file, chunk_files, pbar):
+        files.append(output_file)
+  return files
+
+def _process_dataset(filenames, output_directory, prefix, num_shards, labels=None):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -315,25 +328,9 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
     for filename in filenames:
       f.write(filename + '\n')
 
-  def process_shards(shards, worker_count):
-    files = []
-
-    with tqdm.tqdm(total=len(filenames) // worker_count) as pbar:
-      for shard in shards:
-        chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
-        output_file = os.path.join(
-            output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
-        pbar.set_description(output_file)
-        if _process_image_files_batch(output_file, chunk_files, labels, pbar):
-          files.append(output_file)
-    return files
-
   with Pool(processes=8, initializer=get_coder) as pool:
     chunks = shards(list(range(num_shards)), 8)
-    def thunk(shards):
-      return process_shards(shards, 8)
-    for files in pool.imap_unordered(thunk, chunks):
-      pass
+    pool.starmap(_process_shards, [(filenames, output_directory, prefix, chunk, num_shards, 8) for chunk in chunks])
 
 def convert_to_tf_records():
   """Convert the Imagenet dataset into TF-Record dumps."""
