@@ -347,7 +347,7 @@ def convert_to_tf_records():
   # Glob all the training files
   tf.logging.info('Glob all the training files.')
   training_files = []
-  for pattern in FLAGS.glob:
+  for pattern in (FLAGS.glob if FLAGS.glob is not None else []):
     training_files.extend(tf.gfile.Glob(pattern))
   if FLAGS.files is not None:
     with open(FLAGS.files) as f:
