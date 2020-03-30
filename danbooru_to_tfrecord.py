@@ -207,6 +207,10 @@ def get_coder():
     g_coder = ImageCoder()
   return g_coder
 
+def _initializer(lock):
+  tqdm.set_lock(lock)
+  get_coder()
+
 def _process_image(filename, coder):
   """Process a single image file.
 
@@ -329,7 +333,7 @@ def _process_dataset(filenames, output_directory, prefix, num_shards, labels=Non
     for filename in filenames:
       f.write(filename + '\n')
 
-  with Pool(processes=8, initializer=get_coder) as pool:
+  with Pool(processes=8, initializer=_initializer, initargs=(tqdm.get_lock(),)) as pool:
     time.sleep(2.0) # give tensorflow logging some time to quit spamming the console
     chunks = shards(list(range(num_shards)), 8)
     pool.starmap(_process_shards, [(filenames, output_directory, prefix, chunk, num_shards, 8, i) for i, chunk in enumerate(chunks)])
