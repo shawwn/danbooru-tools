@@ -273,7 +273,7 @@ def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, c
       example = _convert_to_example(filename, image_buffer, label,
                                     synset, height, width)
       if writer is None:
-        writer = tf.python_io.TFRecordWriter(output_file)
+        writer = tf.python_io.TFRecordWriter(output_file+'.tmp')
       writer.write(example.SerializeToString())
     except Exception as e:
       if isinstance(e, KeyboardInterrupt):
@@ -286,6 +286,7 @@ def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, c
 
   if writer is not None:
     writer.close()
+    os.rename(output_file+'.tmp', output_file)
 
   return writer is not None
 
