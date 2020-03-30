@@ -219,7 +219,7 @@ def _process_image(filename, coder):
     width: integer, image width in pixels.
   """
   # Read the image file.
-  with tf.gfile.FastGFile(filename, 'rb') as f:
+  with tf.gfile.GFile(filename, 'rb') as f:
     image_data = f.read()
 
   # Clean the dirty data.
