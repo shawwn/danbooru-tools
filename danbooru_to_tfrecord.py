@@ -373,8 +373,8 @@ def main(argv):  # pylint: disable=unused-argument
   if FLAGS.out is None:
     raise ValueError('--out must be provided. e.g. --out out/')
 
-  if len(FLAGS.glob) <= 0:
-    raise ValueError('Must specify at least one --glob pattern. Eg. --glob "data/*/*.jpg"')
+  if FLAGS.glob is None and FLAGS.files is None:
+    raise ValueError('Must specify --files images.txt or at least one --glob pattern. Eg. --glob "data/*/*.jpg"')
 
   # Convert the raw data into tf-records
   training_records = convert_to_tf_records()
