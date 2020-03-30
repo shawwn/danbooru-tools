@@ -51,6 +51,7 @@ import random
 import tarfile
 import urllib
 import tqdm
+import time
 
 from absl import app
 from absl import flags
@@ -58,18 +59,20 @@ import tensorflow.compat.v1 as tf
 
 from google.cloud import storage
 
+from multiprocessing import Pool
+
 flags.DEFINE_string(
-    'project', None, 'Google cloud project id for uploading the dataset.')
+    'out', None, 'tfrecord output path.')
 flags.DEFINE_string(
-    'local_scratch_dir', None, 'Scratch directory path for temporary files.')
+    'name', None, 'tfrecord prefix. E.g. --name danbooru2019')
+flags.DEFINE_list(
+    'glob', None, 'Comma-separated glob patterns. E.g. --glob "data/images/*/*.jpg"')
 flags.DEFINE_string(
-    'raw_data_dir', None, 'Directory path for raw Danbooru dataset.')
-flags.DEFINE_string(
-    'dataset_name', 'danbooru2019', 'tfrecord prefix.')
+    'files', None, 'Name of a file that specifies the images in the dataset, one per line. E.g. --files my_list_of_images.txt')
+flags.DEFINE_integer(
+    'shards', 2048, 'Number of tfrecord files to generate')
 
 FLAGS = flags.FLAGS
-
-TRAINING_SHARDS = 2048
 
 def _check_or_create_dir(directory):
   """Check if directory exists otherwise create it."""
@@ -196,6 +199,17 @@ class ImageCoder(object):
     assert image.shape[2] == 3
     return image
 
+g_coder = None
+
+def get_coder():
+  global g_coder
+  if g_coder is None:
+    g_coder = ImageCoder()
+  return g_coder
+
+def _initializer(lock):
+  tqdm.tqdm.set_lock(lock)
+  get_coder()
 
 def _process_image(filename, coder):
   """Process a single image file.
@@ -209,7 +223,7 @@ def _process_image(filename, coder):
     width: integer, image width in pixels.
   """
   # Read the image file.
-  with tf.gfile.FastGFile(filename, 'rb') as f:
+  with tf.gfile.GFile(filename, 'rb') as f:
     image_data = f.read()
 
   # Clean the dirty data.
@@ -233,7 +247,7 @@ def _process_image(filename, coder):
 
   return image_data, height, width
 
-def _process_image_files_batch(coder, output_file, filenames, labels):
+def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, coder=None):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -242,9 +256,12 @@ def _process_image_files_batch(coder, output_file, filenames, labels):
     filenames: list of strings; each string is a path to an image file
     labels: map of string to integer; id for all synset labels
   """
-  writer = tf.python_io.TFRecordWriter(output_file)
+  writer = None
 
-  for filename in tqdm.tqdm(list(filenames)):
+  if coder is None:
+    coder = get_coder()
+
+  for filename in filenames:
     try:
       image_buffer, height, width = _process_image(filename, coder)
       #label = labels[synset]
@@ -252,15 +269,52 @@ def _process_image_files_batch(coder, output_file, filenames, labels):
       label = 0
       example = _convert_to_example(filename, image_buffer, label,
                                     synset, height, width)
+      if writer is None:
+        writer = tf.python_io.TFRecordWriter(output_file)
       writer.write(example.SerializeToString())
-    except:
+    except Exception as e:
+      if isinstance(e, KeyboardInterrupt):
+        break
       import traceback
       traceback.print_exc()
+    finally:
+      if pbar is not None:
+        pbar.update(1)
 
-  writer.close()
+  if writer is not None:
+    writer.close()
+
+  return writer is not None
 
 
-def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
+def tuples(l, n=2):
+  r = []
+  for i in range(0, len(l), n):
+    r.append(l[i:i+n])
+  return r
+
+def shards(l, n):
+  r = [[] for _ in range(n)]
+  for v in tuples(l, n):
+    for i, x in enumerate(v):
+      r[i].append(x)
+  return r
+
+def _process_shards(filenames, output_directory, prefix, shards, num_shards, worker_count, worker_index):
+  files = []
+  chunksize = int(math.ceil(len(filenames) / num_shards))
+
+  with tqdm.tqdm(total=len(filenames) // worker_count, position=worker_index) as pbar:
+    for shard in shards:
+      chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
+      output_file = os.path.join(
+          output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
+      pbar.set_description(output_file)
+      if _process_image_files_batch(output_file, chunk_files, pbar=pbar):
+        files.append(output_file)
+  return files
+
+def _process_dataset(filenames, output_directory, prefix, num_shards, labels=None):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -274,26 +328,17 @@ def _process_dataset(filenames, labels, output_directory, prefix, num_shards):
     files: list of tf-record filepaths created from processing the dataset.
   """
   _check_or_create_dir(output_directory)
-  chunksize = int(math.ceil(len(filenames) / num_shards))
-  coder = ImageCoder()
 
   with open(os.path.join(output_directory, '%s-filenames.txt' % prefix), 'w') as f:
     for filename in filenames:
       f.write(filename + '\n')
 
-  files = []
+  with Pool(processes=8, initializer=_initializer, initargs=(tqdm.tqdm.get_lock(),)) as pool:
+    time.sleep(2.0) # give tensorflow logging some time to quit spamming the console
+    chunks = shards(list(range(num_shards)), 8)
+    pool.starmap(_process_shards, [(filenames, output_directory, prefix, chunk, num_shards, 8, i) for i, chunk in enumerate(chunks)])
 
-  for shard in tqdm.tqdm([_ for _ in range(num_shards)]):
-    chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
-    output_file = os.path.join(
-        output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
-    _process_image_files_batch(coder, output_file, chunk_files, labels)
-    tf.logging.info('Finished writing file: %s' % output_file)
-    files.append(output_file)
-  return files
-
-
-def convert_to_tf_records(raw_data_dir):
+def convert_to_tf_records():
   """Convert the Imagenet dataset into TF-Record dumps."""
 
   # Shuffle training records to ensure we are distributing classes
@@ -308,30 +353,37 @@ def convert_to_tf_records(raw_data_dir):
   # Glob all the training files
   tf.logging.info('Glob all the training files.')
   training_files = []
-  training_files.extend(tf.gfile.Glob(
-      os.path.join(raw_data_dir, '*', '*.jpg')))
-  training_files.extend(tf.gfile.Glob(
-      os.path.join(raw_data_dir, '*', '*.png')))
+  for pattern in (FLAGS.glob if FLAGS.glob is not None else []):
+    training_files.extend(tf.gfile.Glob(pattern))
+  if FLAGS.files is not None:
+    with open(FLAGS.files) as f:
+      for filename in f:
+        training_files.append(filename.strip())
+  assert len(training_files) > 0
 
   training_shuffle_idx = make_shuffle_idx(len(training_files))
   training_files = [training_files[i] for i in training_shuffle_idx]
 
-  labels = {}
-
   # Create training data
   tf.logging.info('Processing the training data.')
-  training_records = _process_dataset(training_files, labels, FLAGS.local_scratch_dir, FLAGS.dataset_name, TRAINING_SHARDS)
+  training_records = _process_dataset(training_files, FLAGS.out, FLAGS.name, FLAGS.shards)
 
   return training_records
 
 def main(argv):  # pylint: disable=unused-argument
   tf.logging.set_verbosity(tf.logging.INFO)
 
-  if FLAGS.local_scratch_dir is None:
-    raise ValueError('Scratch directory path must be provided.')
+  if FLAGS.name is None:
+    raise ValueError('--name must be provided. e.g. --name danbooru2019-s')
+
+  if FLAGS.out is None:
+    raise ValueError('--out must be provided. e.g. --out out/')
+
+  if FLAGS.glob is None and FLAGS.files is None:
+    raise ValueError('Must specify --files images.txt or at least one --glob pattern. Eg. --glob "data/*/*.jpg"')
 
   # Convert the raw data into tf-records
-  training_records = convert_to_tf_records(FLAGS.raw_data_dir)
+  training_records = convert_to_tf_records()
 
 
 if __name__ == '__main__':
