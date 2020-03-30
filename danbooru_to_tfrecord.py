@@ -311,7 +311,7 @@ def _process_shards(filenames, output_directory, prefix, shards, num_shards, wor
   files = []
   chunksize = int(math.ceil(len(filenames) / num_shards))
 
-  with tqdm.tqdm(total=len(filenames) // worker_count, position=worker_index, dynamic_ncols=True, miniters=0, dynamic_miniters=True, mininterval=1.0) as pbar:
+  with tqdm.tqdm(total=len(filenames) // worker_count, position=worker_index, dynamic_ncols=True, mininterval=1.0) as pbar:
     for shard in shards:
       chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
       output_file = os.path.join(
