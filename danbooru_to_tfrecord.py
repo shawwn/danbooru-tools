@@ -71,6 +71,8 @@ flags.DEFINE_string(
     'files', None, 'Name of a file that specifies the images in the dataset, one per line. E.g. --files my_list_of_images.txt')
 flags.DEFINE_integer(
     'shards', 2048, 'Number of tfrecord files to generate')
+flags.DEFINE_integer(
+    'nprocs', 8, 'Number of processes to work in parallel')
 
 FLAGS = flags.FLAGS
 
@@ -333,10 +335,10 @@ def _process_dataset(filenames, output_directory, prefix, num_shards, labels=Non
     for filename in filenames:
       f.write(filename + '\n')
 
-  with Pool(processes=8, initializer=_initializer, initargs=(tqdm.tqdm.get_lock(),)) as pool:
+  with Pool(processes=FLAGS.nprocs, initializer=_initializer, initargs=(tqdm.tqdm.get_lock(),)) as pool:
     time.sleep(2.0) # give tensorflow logging some time to quit spamming the console
-    chunks = shards(list(range(num_shards)), 8)
-    pool.starmap(_process_shards, [(filenames, output_directory, prefix, chunk, num_shards, 8, i) for i, chunk in enumerate(chunks)])
+    chunks = shards(list(range(num_shards)), FLAGS.nprocs)
+    pool.starmap(_process_shards, [(filenames, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i) for i, chunk in enumerate(chunks)])
 
 def convert_to_tf_records():
   """Convert the Imagenet dataset into TF-Record dumps."""
