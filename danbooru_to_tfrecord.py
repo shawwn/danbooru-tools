@@ -47,6 +47,7 @@ the format:
 
 import math
 import os
+import sys
 import random
 import tarfile
 import urllib
@@ -278,6 +279,7 @@ def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, c
     except Exception as e:
       if isinstance(e, KeyboardInterrupt):
         break
+      sys.stderr.write('Error on %s\n' % filename)
       import traceback
       traceback.print_exc()
     finally:
