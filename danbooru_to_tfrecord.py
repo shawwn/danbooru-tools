@@ -360,8 +360,7 @@ def convert_to_tf_records():
     training_files.extend(tf.gfile.Glob(pattern))
   if FLAGS.files is not None:
     with open(FLAGS.files) as f:
-      for filename in f:
-        training_files.append(filename.strip())
+      training_files.extend(f.read().splitlines())
   assert len(training_files) > 0
 
   training_shuffle_idx = make_shuffle_idx(len(training_files))
