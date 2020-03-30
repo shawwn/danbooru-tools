@@ -185,6 +185,11 @@ class ImageCoder(object):
     # Initializes function that decodes RGB JPEG data.
     self._decode_jpeg_data = tf.placeholder(dtype=tf.string)
     self._decode_jpeg = tf.image.decode_jpeg(self._decode_jpeg_data, channels=3)
+    self._is_jpeg = tf.io.is_jpeg(self._decode_jpeg_data)
+
+  def is_jpeg(self, image_data):
+    return self._sess.run(self._is_jpeg,
+                          feed_dict={self._decode_jpeg_data: image_data})
 
   def png_to_jpeg(self, image_data):
     return self._sess.run(self._png_to_jpeg,
@@ -229,14 +234,10 @@ def _process_image(filename, coder):
     image_data = f.read()
 
   # Clean the dirty data.
-  if _is_png(filename):
+  if not coder.is_jpeg(image_data):
     # 1 image is a PNG.
     tf.logging.info('Converting PNG to JPEG for %s' % filename)
     image_data = coder.png_to_jpeg(image_data)
-  elif _is_cmyk(filename):
-    # 22 JPEG images are in CMYK colorspace.
-    tf.logging.info('Converting CMYK to RGB for %s' % filename)
-    image_data = coder.cmyk_to_rgb(image_data)
 
   # Decode the RGB JPEG.
   image = coder.decode_jpeg(image_data)
