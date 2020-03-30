@@ -66,6 +66,8 @@ flags.DEFINE_string(
     'name', None, 'tfrecord prefix. E.g. --name danbooru2019')
 flags.DEFINE_list(
     'glob', None, 'Comma-separated glob patterns. E.g. --glob "data/images/*/*.jpg"')
+flags.DEFINE_string(
+    'files', None, 'Name of a file that specifies the images in the dataset, one per line. E.g. --files my_list_of_images.txt')
 flags.DEFINE_integer(
     'shards', 2048, 'Number of tfrecord files to generate')
 
@@ -347,6 +349,10 @@ def convert_to_tf_records():
   training_files = []
   for pattern in FLAGS.glob:
     training_files.extend(tf.gfile.Glob(pattern))
+  if FLAGS.files is not None:
+    with open(FLAGS.files) as f:
+      for filename in f:
+        training_files.append(filename)
   assert len(training_files) > 0
 
   training_shuffle_idx = make_shuffle_idx(len(training_files))
