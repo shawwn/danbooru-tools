@@ -352,7 +352,7 @@ def convert_to_tf_records():
   if FLAGS.files is not None:
     with open(FLAGS.files) as f:
       for filename in f:
-        training_files.append(filename)
+        training_files.append(filename.strip())
   assert len(training_files) > 0
 
   training_shuffle_idx = make_shuffle_idx(len(training_files))
