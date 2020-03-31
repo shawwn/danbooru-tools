@@ -173,6 +173,10 @@ class ImageCoder(object):
     # Create a single Session to run all image coding calls.
     self._sess = tf.Session()
 
+    # Initializes function that converts an image to JPEG data.
+    self._img_ph = tf.placeholder(dtype=tf.uint8)
+    self._img_to_jpeg = tf.image.encode_jpeg(self._img_ph, format='rgb', quality=100)
+
     # Initializes function that converts PNG to JPEG data.
     self._png_data = tf.placeholder(dtype=tf.string)
     image = tf.io.decode_image(self._png_data, channels=3)
@@ -180,12 +184,12 @@ class ImageCoder(object):
 
     # Initializes function that converts CMYK JPEG data to RGB JPEG data.
     self._cmyk_data = tf.placeholder(dtype=tf.string)
-    image = tf.image.decode_jpeg(self._cmyk_data, channels=0)
+    image = tf.io.decode_image(self._cmyk_data, channels=0)
     self._cmyk_to_rgb = tf.image.encode_jpeg(image, format='rgb', quality=100)
 
     # Initializes function that decodes RGB JPEG data.
     self._decode_jpeg_data = tf.placeholder(dtype=tf.string)
-    self._decode_jpeg = tf.image.decode_jpeg(self._decode_jpeg_data, channels=3)
+    self._decode_jpeg = tf.io.decode_image(self._decode_jpeg_data)
     self._is_jpeg = tf.io.is_jpeg(self._decode_jpeg_data)
 
   def is_jpeg(self, image_data):
@@ -193,8 +197,12 @@ class ImageCoder(object):
                           feed_dict={self._decode_jpeg_data: image_data})
 
   def to_jpeg(self, image_data):
-    return self._sess.run(self._to_jpeg,
-                          feed_dict={self._png_data: image_data})
+    if isinstance(image_data, bytes):
+      return self._sess.run(self._to_jpeg,
+                            feed_dict={self._png_data: image_data})
+    else:
+      return self._sess.run(self._img_to_jpeg,
+                            feed_dict={self._img_ph: image_data})
 
   def cmyk_to_rgb(self, image_data):
     return self._sess.run(self._cmyk_to_rgb,
@@ -234,13 +242,7 @@ def _process_image(filename, coder):
   with tf.gfile.GFile(filename, 'rb') as f:
     image_data = f.read()
 
-  # Clean the dirty data.
-  if not coder.is_jpeg(image_data):
-    # 1 image is a PNG.
-    #tf.logging.info('Converting to JPEG for %s' % filename)
-    image_data = coder.to_jpeg(image_data)
-
-  # Decode the RGB JPEG.
+  # Decode the image.
   image = coder.decode_jpeg(image_data)
 
   # Check that image converted to RGB
@@ -248,6 +250,9 @@ def _process_image(filename, coder):
   height = image.shape[0]
   width = image.shape[1]
   assert image.shape[2] == 3
+
+  # Re-encode as RGB JPEG.
+  image_data = coder.to_jpeg(image)
 
   return image_data, height, width
 
