@@ -74,6 +74,8 @@ flags.DEFINE_integer(
     'shards', 2048, 'Number of tfrecord files to generate')
 flags.DEFINE_integer(
     'nprocs', 8, 'Number of processes to work in parallel')
+flags.DEFINE_boolean(
+    'directory_labels', False, 'Use the directory name of each file as a label')
 
 FLAGS = flags.FLAGS
 
@@ -259,12 +261,13 @@ def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, c
   if coder is None:
     coder = get_coder()
 
-  for filename in filenames:
+  if labels is None:
+    labels = [0 for _ in range(len(filenames))]
+
+  for label, filename in zip(labels, filenames):
     try:
       image_buffer, height, width = _process_image(filename, coder)
-      #label = labels[synset]
       synset = b''
-      label = 0
       example = _convert_to_example(filename, image_buffer, label,
                                     synset, height, width)
       if writer is None:
@@ -301,17 +304,18 @@ def shards(l, n):
       r[i].append(x)
   return r
 
-def _process_shards(filenames, output_directory, prefix, shards, num_shards, worker_count, worker_index):
+def _process_shards(filenames, labels, output_directory, prefix, shards, num_shards, worker_count, worker_index):
   files = []
   chunksize = int(math.ceil(len(filenames) / num_shards))
 
   with tqdm.tqdm(total=len(filenames) // worker_count, position=worker_index, dynamic_ncols=True, mininterval=1.0) as pbar:
     for shard in shards:
       chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
+      chunk_labels = labels[shard * chunksize : (shard + 1) * chunksize] if labels is not None else None
       output_file = os.path.join(
           output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
       pbar.set_description(output_file)
-      if _process_image_files_batch(output_file, chunk_files, pbar=pbar):
+      if _process_image_files_batch(output_file, chunk_files, labels=chunk_labels, pbar=pbar):
         files.append(output_file)
   return files
 
@@ -334,10 +338,15 @@ def _process_dataset(filenames, output_directory, prefix, num_shards, labels=Non
     for filename in filenames:
       f.write(filename + '\n')
 
+  if labels is not None:
+    with open(os.path.join(output_directory, '%s-labels.txt' % prefix), 'w') as f:
+      for label in labels:
+        f.write('{}\n'.format(label))
+
   with Pool(processes=FLAGS.nprocs, initializer=_initializer, initargs=(tqdm.tqdm.get_lock(),)) as pool:
     time.sleep(2.0) # give tensorflow logging some time to quit spamming the console
     chunks = shards(list(range(num_shards)), FLAGS.nprocs)
-    pool.starmap(_process_shards, [(filenames, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i) for i, chunk in enumerate(chunks)])
+    pool.starmap(_process_shards, [(filenames, labels, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i) for i, chunk in enumerate(chunks)])
 
 def convert_to_tf_records():
   """Convert the Imagenet dataset into TF-Record dumps."""
@@ -363,10 +372,15 @@ def convert_to_tf_records():
 
   training_shuffle_idx = make_shuffle_idx(len(training_files))
   training_files = [training_files[i] for i in training_shuffle_idx]
+  training_labels = None
+
+  if FLAGS.directory_labels:
+    labeldirs = dict([(i, x) for x, i in enumerate(sorted(set([os.path.dirname(x) for x in training_files])))])
+    training_labels = [labeldirs[os.path.dirname(x)] for x in training_files]
 
   # Create training data
   tf.logging.info('Processing the training data.')
-  training_records = _process_dataset(training_files, FLAGS.out, FLAGS.name, FLAGS.shards)
+  training_records = _process_dataset(training_files, FLAGS.out, FLAGS.name, FLAGS.shards, labels=training_labels)
 
   return training_records
 
