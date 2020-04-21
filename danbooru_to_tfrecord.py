@@ -80,6 +80,8 @@ flags.DEFINE_string(
     'crop_method', 'none', '<random, distorted, middle, none>')
 flags.DEFINE_integer(
     'resize', -1, 'Resize to a specific resolution')
+flags.DEFINE_string(
+    'doc2vec_embeddings', None, 'Use a doc2vec model for embeddings')
 
 FLAGS = flags.FLAGS
 
@@ -94,6 +96,9 @@ def _int64_feature(value):
     value = [value]
   return tf.train.Feature(int64_list=tf.train.Int64List(value=value))
 
+def _float_feature(value):
+  """Wrapper for inserting float features into Example proto."""
+  return tf.train.Feature(float_list=tf.train.FloatList(value=value))
 
 def _as_bytes(x):
   if isinstance(x, str):
@@ -105,13 +110,14 @@ def _bytes_feature(value):
   return tf.train.Feature(bytes_list=tf.train.BytesList(value=[_as_bytes(value)]))
 
 
-def _convert_to_example(filename, image_buffer, label, synset, height, width):
+def _convert_to_example(filename, image_buffer, label, embedding, synset, height, width):
   """Build an Example proto for an example.
 
   Args:
     filename: string, path to an image file, e.g., '/path/to/example.JPG'
     image_buffer: string, JPEG encoding of RGB image
     label: integer, identifier for the ground truth for the network
+    embedding: list of floats
     synset: string, unique WordNet ID specifying the label, e.g., 'n02323233'
     height: integer, image height in pixels
     width: integer, image width in pixels
@@ -128,6 +134,7 @@ def _convert_to_example(filename, image_buffer, label, synset, height, width):
       'image/colorspace': _bytes_feature(colorspace),
       'image/channels': _int64_feature(channels),
       'image/class/label': _int64_feature(label),
+      'image/class/embedding': _float_feature(embedding),
       'image/class/synset': _bytes_feature(synset),
       'image/format': _bytes_feature(image_format),
       'image/filename': _bytes_feature(os.path.basename(filename)),
@@ -307,7 +314,7 @@ def _process_image(filename, coder, options):
 
   return image_data, height, width
 
-def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, coder=None, options={}):
+def _process_image_files_batch(output_file, filenames, labels=None, embeddings=None, pbar=None, coder=None, options={}):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -324,11 +331,14 @@ def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, c
   if labels is None:
     labels = [0 for _ in range(len(filenames))]
 
-  for label, filename in zip(labels, filenames):
+  if embeddings is None:
+    embeddings = [[] for _ in range(len(filenames))]
+
+  for label, embedding, filename in zip(labels, embeddings, filenames):
     try:
       image_buffer, height, width = _process_image(filename, coder, options)
       synset = b''
-      example = _convert_to_example(filename, image_buffer, label,
+      example = _convert_to_example(filename, image_buffer, label, embedding,
                                     synset, height, width)
       if writer is None:
         writer = tf.python_io.TFRecordWriter(output_file)#+'.tmp')
@@ -364,7 +374,7 @@ def shards(l, n):
       r[i].append(x)
   return r
 
-def _process_shards(filenames, labels, output_directory, prefix, shards, num_shards, worker_count, worker_index, options):
+def _process_shards(filenames, labels, embeddings, output_directory, prefix, shards, num_shards, worker_count, worker_index, options):
   files = []
   chunksize = int(math.ceil(len(filenames) / num_shards))
 
@@ -372,19 +382,19 @@ def _process_shards(filenames, labels, output_directory, prefix, shards, num_sha
     for shard in shards:
       chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
       chunk_labels = labels[shard * chunksize : (shard + 1) * chunksize] if labels is not None else None
+      chunk_embeddings = embeddings[shard * chunksize : (shard + 1) * chunksize] if embeddings is not None else None
       output_file = os.path.join(
           output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
       pbar.set_description(output_file)
-      if _process_image_files_batch(output_file, chunk_files, labels=chunk_labels, pbar=pbar, options=options):
+      if _process_image_files_batch(output_file, chunk_files, labels=chunk_labels, embeddings=chunk_embeddings, pbar=pbar, options=options):
         files.append(output_file)
   return files
 
-def _process_dataset(filenames, output_directory, prefix, num_shards, labels=None):
+def _process_dataset(filenames, output_directory, prefix, num_shards, labels=None, embeddings=None):
   """Processes and saves list of images as TFRecords.
 
   Args:
     filenames: list of strings; each string is a path to an image file
-    labels: map of string to integer; id for all synset labels
     output_directory: path where output files should be created
     prefix: string; prefix for each file
     num_shards: number of chucks to split the filenames into
@@ -403,15 +413,26 @@ def _process_dataset(filenames, output_directory, prefix, num_shards, labels=Non
       for label in labels:
         f.write('{}\n'.format(label))
 
+  if embeddings is not None:
+    path = os.path.join(output_directory, '%s-embeddings.npy' % prefix)
+    tf.logging.info('Saving embeddings to %s', path)
+    import numpy as np
+    embeds = np.array(embeddings, dtype=np.float32)
+    np.save(path, embeds)
+
   options = {
       'resize': FLAGS.resize,
       'crop_method': FLAGS.crop_method,
   }
 
-  with Pool(processes=FLAGS.nprocs, initializer=_initializer, initargs=(tqdm.tqdm.get_lock(),options,)) as pool:
-    time.sleep(2.0) # give tensorflow logging some time to quit spamming the console
-    chunks = shards(list(range(num_shards)), FLAGS.nprocs)
-    pool.starmap(_process_shards, [(filenames, labels, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i, options) for i, chunk in enumerate(chunks)])
+  chunks = shards(list(range(num_shards)), FLAGS.nprocs)
+  args = [(filenames, labels, embeddings, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i, options) for i, chunk in enumerate(chunks)]
+  if FLAGS.nprocs <= 1:
+    _process_shards(*args[0])
+  else:
+    with Pool(processes=FLAGS.nprocs, initializer=_initializer, initargs=(tqdm.tqdm.get_lock(),options,)) as pool:
+      time.sleep(2.0) # give tensorflow logging some time to quit spamming the console
+      pool.starmap(_process_shards, args)
 
 def convert_to_tf_records():
   """Convert the Imagenet dataset into TF-Record dumps."""
@@ -438,6 +459,15 @@ def convert_to_tf_records():
   training_shuffle_idx = make_shuffle_idx(len(training_files))
   training_files = [training_files[i] for i in training_shuffle_idx]
   training_labels = None
+  training_embeddings = None
+
+  if FLAGS.doc2vec_embeddings is not None:
+    from gensim.models.doc2vec import Doc2Vec, TaggedDocument
+    tf.logging.info('Loading embeddings from %s', FLAGS.doc2vec_embeddings)
+    model = Doc2Vec.load(FLAGS.doc2vec_embeddings)
+    tf.logging.info('Gathering embeddings...')
+    ids = [int(os.path.basename(x).split('.')[0].split('_')[0]) for x in training_files]
+    training_embeddings = [model.docvecs[x] for x in ids]
 
   if FLAGS.directory_labels:
     labeldirs = dict([(i, x) for x, i in enumerate(sorted(set([os.path.dirname(x) for x in training_files])))])
@@ -445,7 +475,7 @@ def convert_to_tf_records():
 
   # Create training data
   tf.logging.info('Processing the training data.')
-  training_records = _process_dataset(training_files, FLAGS.out, FLAGS.name, FLAGS.shards, labels=training_labels)
+  training_records = _process_dataset(training_files, FLAGS.out, FLAGS.name, FLAGS.shards, labels=training_labels, embeddings=training_embeddings)
 
   return training_records
 
