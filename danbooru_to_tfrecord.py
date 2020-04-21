@@ -402,7 +402,7 @@ def _process_shards(filenames, labels, output_directory, prefix, shards, num_sha
         files.append(output_file)
   return files
 
-def _process_dataset(filenames, output_directory, prefix, num_shards, labels=None, embeddings=None):
+def _process_dataset(filenames, output_directory, prefix, num_shards, labels=None):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -424,13 +424,6 @@ def _process_dataset(filenames, output_directory, prefix, num_shards, labels=Non
     with open(os.path.join(output_directory, '%s-labels.txt' % prefix), 'w') as f:
       for label in labels:
         f.write('{}\n'.format(label))
-
-  if embeddings is not None:
-    path = os.path.join(output_directory, '%s-embeddings.npy' % prefix)
-    tf.logging.info('Saving embeddings to %s', path)
-    import numpy as np
-    embeds = np.array(embeddings, dtype=np.float32)
-    np.save(path, embeds)
 
   options = {
       'resize': FLAGS.resize,
@@ -472,15 +465,6 @@ def convert_to_tf_records():
   training_shuffle_idx = make_shuffle_idx(len(training_files))
   training_files = [training_files[i] for i in training_shuffle_idx]
   training_labels = None
-  training_embeddings = None
-
-  if FLAGS.doc2vec_embeddings is not None:
-    from gensim.models.doc2vec import Doc2Vec, TaggedDocument
-    tf.logging.info('Loading embeddings from %s', FLAGS.doc2vec_embeddings)
-    model = Doc2Vec.load(FLAGS.doc2vec_embeddings)
-    tf.logging.info('Gathering embeddings...')
-    ids = [int(os.path.basename(x).split('.')[0].split('_')[0]) for x in training_files]
-    training_embeddings = [model.docvecs[x] for x in ids]
 
   if FLAGS.directory_labels:
     labeldirs = dict([(i, x) for x, i in enumerate(sorted(set([os.path.dirname(x) for x in training_files])))])
@@ -488,7 +472,7 @@ def convert_to_tf_records():
 
   # Create training data
   tf.logging.info('Processing the training data.')
-  training_records = _process_dataset(training_files, FLAGS.out, FLAGS.name, FLAGS.shards, labels=training_labels, embeddings=training_embeddings)
+  training_records = _process_dataset(training_files, FLAGS.out, FLAGS.name, FLAGS.shards, labels=training_labels)
 
   return training_records
 
