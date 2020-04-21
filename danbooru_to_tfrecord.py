@@ -203,6 +203,21 @@ class ImageCoder(object):
     self._decode_jpeg = tf.image.decode_image(self._decode_jpeg_data, channels=3)
     self._is_jpeg = tf.io.is_jpeg(self._decode_jpeg_data)
 
+    self._options = options
+    self._model = None
+
+  def get_embedding(self, image_name):
+    if self._model is None:
+      if self._options["doc2vec_embeddings"] is not None:
+        from gensim.models.doc2vec import Doc2Vec, TaggedDocument
+        tf.logging.info('Loading embeddings from %s', self._options["doc2vec_embeddings"])
+        self._model = Doc2Vec.load(self._options["doc2vec_embeddings"])
+    if self._model is not None:
+      idx = int(os.path.basename(image_name).split('.')[0].split('_')[0])
+      return self._model.docvecs[idx]
+    else:
+      return []
+
   def is_jpeg(self, image_data):
     return self._sess.run(self._is_jpeg,
                           feed_dict={self._decode_jpeg_data: image_data})
@@ -314,7 +329,7 @@ def _process_image(filename, coder, options):
 
   return image_data, height, width
 
-def _process_image_files_batch(output_file, filenames, labels=None, embeddings=None, pbar=None, coder=None, options={}):
+def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, coder=None, options={}):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -331,12 +346,10 @@ def _process_image_files_batch(output_file, filenames, labels=None, embeddings=N
   if labels is None:
     labels = [0 for _ in range(len(filenames))]
 
-  if embeddings is None:
-    embeddings = [[] for _ in range(len(filenames))]
-
-  for label, embedding, filename in zip(labels, embeddings, filenames):
+  for label, filename in zip(labels, filenames):
     try:
       image_buffer, height, width = _process_image(filename, coder, options)
+      embedding = coder.get_embedding(filename)
       synset = b''
       example = _convert_to_example(filename, image_buffer, label, embedding,
                                     synset, height, width)
@@ -374,7 +387,7 @@ def shards(l, n):
       r[i].append(x)
   return r
 
-def _process_shards(filenames, labels, embeddings, output_directory, prefix, shards, num_shards, worker_count, worker_index, options):
+def _process_shards(filenames, labels, output_directory, prefix, shards, num_shards, worker_count, worker_index, options):
   files = []
   chunksize = int(math.ceil(len(filenames) / num_shards))
 
@@ -382,11 +395,10 @@ def _process_shards(filenames, labels, embeddings, output_directory, prefix, sha
     for shard in shards:
       chunk_files = filenames[shard * chunksize : (shard + 1) * chunksize]
       chunk_labels = labels[shard * chunksize : (shard + 1) * chunksize] if labels is not None else None
-      chunk_embeddings = embeddings[shard * chunksize : (shard + 1) * chunksize] if embeddings is not None else None
       output_file = os.path.join(
           output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
       pbar.set_description(output_file)
-      if _process_image_files_batch(output_file, chunk_files, labels=chunk_labels, embeddings=chunk_embeddings, pbar=pbar, options=options):
+      if _process_image_files_batch(output_file, chunk_files, labels=chunk_labels, pbar=pbar, options=options):
         files.append(output_file)
   return files
 
@@ -423,10 +435,11 @@ def _process_dataset(filenames, output_directory, prefix, num_shards, labels=Non
   options = {
       'resize': FLAGS.resize,
       'crop_method': FLAGS.crop_method,
+      'doc2vec_embeddings': FLAGS.doc2vec_embeddings,
   }
 
   chunks = shards(list(range(num_shards)), FLAGS.nprocs)
-  args = [(filenames, labels, embeddings, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i, options) for i, chunk in enumerate(chunks)]
+  args = [(filenames, labels, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i, options) for i, chunk in enumerate(chunks)]
   if FLAGS.nprocs <= 1:
     _process_shards(*args[0])
   else:
