@@ -184,7 +184,7 @@ class ImageCoder(object):
     image = tf.io.decode_image(self._png_data, channels=3)
     #image = _transform_image(image, target_image_shape=[FLAGS.resize, FLAGS.resize] if FLAGS.resize > 0 else None, crop_method=FLAGS.crop_method)
     image = _transform_image(image, target_image_shape=[options["resize"], options["resize"]] if options["resize"] > 0 else None, crop_method=options["crop_method"])
-    self._to_jpeg = tf.image.encode_jpeg(tf.cast(image, tf.uint8), format='rgb', quality=100)
+    self._to_jpeg = (tf.image.encode_jpeg(tf.cast(image, tf.uint8), format='rgb', quality=100), image)
 
     # Initializes function that converts CMYK JPEG data to RGB JPEG data.
     self._cmyk_data = tf.placeholder(dtype=tf.string)
@@ -293,10 +293,11 @@ def _process_image(filename, coder, options):
     image_data = f.read()
 
   if options["crop_method"] != "none" or options["resize"] > 0:
-    image_data = coder.to_jpeg(image_data)
-
-  # Decode the RGB JPEG.
-  image = coder.decode_jpeg(image_data)
+    # Decode and crop.
+    image_data, image = coder.to_jpeg(image_data)
+  else:
+    # Decode.
+    image = coder.decode_jpeg(image_data)
 
   # Check that image converted to RGB
   assert len(image.shape) == 3
