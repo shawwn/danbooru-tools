@@ -292,12 +292,11 @@ def _process_image(filename, coder, options):
   with tf.gfile.GFile(filename, 'rb') as f:
     image_data = f.read()
 
-  # Decode the RGB JPEG.
-  image = coder.decode_jpeg(image_data)
-
-  #image = _transform_image(image, target_image_shape=[options["resize"], options["resize"]] if options["resize"] > 0 else None, crop_method=options["crop_method"])
   if options["crop_method"] != "none" or options["resize"] > 0:
     image_data = coder.to_jpeg(image_data)
+
+  # Decode the RGB JPEG.
+  image = coder.decode_jpeg(image_data)
 
   # Check that image converted to RGB
   assert len(image.shape) == 3
