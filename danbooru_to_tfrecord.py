@@ -76,6 +76,10 @@ flags.DEFINE_integer(
     'nprocs', 8, 'Number of processes to work in parallel')
 flags.DEFINE_boolean(
     'directory_labels', False, 'Use the directory name of each file as a label')
+flags.DEFINE_string(
+    'crop_method', 'none', '<random, distorted, middle, none>')
+flags.DEFINE_integer(
+    'resize', -1, 'Resize to a specific resolution')
 
 FLAGS = flags.FLAGS
 
@@ -221,7 +225,57 @@ def _initializer(lock):
   tqdm.tqdm.set_lock(lock)
   get_coder()
 
-def _process_image(filename, coder):
+def _transform_image(image, target_image_shape=None, crop_method="random", image_channels=3, seed=None):
+  """Preprocesses ImageNet images to have a target image shape.
+
+  Args:
+    image: 3-D tensor with a single image.
+    target_image_shape: List/Tuple with target image shape.
+    crop_method: Method for cropping the image:
+      One of: distorted, random, middle, none
+    seed: Random seed
+
+  Returns:
+    Image tensor with shape `target_image_shape`.
+  """
+  if crop_method == "distorted":
+    begin, size, _ = tf.image.sample_distorted_bounding_box(
+        tf.shape(image),
+        tf.zeros([0, 0, 4], tf.float32),
+        aspect_ratio_range=[1.0, 1.0],
+        area_range=[0.9, 1.0],
+        use_image_if_no_bounding_boxes=True,
+        seed=seed)
+    image = tf.slice(image, begin, size)
+    # Unfortunately, the above operation loses the depth-dimension. So we need
+    # to restore it the manual way.
+    image.set_shape([None, None, image_channels])
+  elif crop_method == "random":
+    shape = tf.shape(image)
+    h, w = shape[0], shape[1]
+    size = tf.minimum(h, w)
+    begin = [h - size, w - size] * tf.random.uniform([2], 0, 1, seed=seed)
+    begin = tf.cast(begin, tf.int32)
+    begin = tf.concat([begin, [0]], axis=0)  # Add channel dimension.
+    image = tf.slice(image, begin, [size, size, 3])
+  elif crop_method == "middle":
+    shape = tf.shape(image)
+    h, w = shape[0], shape[1]
+    size = tf.minimum(h, w)
+    begin = tf.cast([h - size, w - size], tf.float32) / 2.0
+    begin = tf.cast(begin, tf.int32)
+    begin = tf.concat([begin, [0]], axis=0)  # Add channel dimension.
+    image = tf.slice(image, begin, [size, size, 3])
+  elif crop_method != "none":
+    raise ValueError("Unsupported crop method: {}".format(crop_method))
+  if target_image_shape is not None:
+    image = tf.image.resize_images(
+        image, [target_image_shape[0], target_image_shape[1]],
+        method=tf.image.ResizeMethod.AREA)
+    image.set_shape(target_image_shape + [image_channels])
+  return image
+
+def _process_image(filename, coder, options):
   """Process a single image file.
 
   Args:
@@ -239,6 +293,10 @@ def _process_image(filename, coder):
   # Decode the RGB JPEG.
   image = coder.decode_jpeg(image_data)
 
+  image = _transform_image(image, target_image_shape=[options["resize"], options["resize"]] if options["resize"] > 0 else None, crop_method=options["crop_method"])
+  if options["crop_method"] != "none" or options["resize"] > 0:
+    image_data = coder._sess.run(tf.image.encode_jpeg(tf.cast(image, dtype=tf.uint8), format='rgb', quality=100))
+
   # Check that image converted to RGB
   assert len(image.shape) == 3
   height = image.shape[0]
@@ -247,7 +305,7 @@ def _process_image(filename, coder):
 
   return image_data, height, width
 
-def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, coder=None):
+def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, coder=None, options={}):
   """Processes and saves list of images as TFRecords.
 
   Args:
@@ -266,7 +324,7 @@ def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, c
 
   for label, filename in zip(labels, filenames):
     try:
-      image_buffer, height, width = _process_image(filename, coder)
+      image_buffer, height, width = _process_image(filename, coder, options)
       synset = b''
       example = _convert_to_example(filename, image_buffer, label,
                                     synset, height, width)
@@ -304,7 +362,7 @@ def shards(l, n):
       r[i].append(x)
   return r
 
-def _process_shards(filenames, labels, output_directory, prefix, shards, num_shards, worker_count, worker_index):
+def _process_shards(filenames, labels, output_directory, prefix, shards, num_shards, worker_count, worker_index, options):
   files = []
   chunksize = int(math.ceil(len(filenames) / num_shards))
 
@@ -315,7 +373,7 @@ def _process_shards(filenames, labels, output_directory, prefix, shards, num_sha
       output_file = os.path.join(
           output_directory, '%s-%.5d-of-%.5d' % (prefix, shard, num_shards))
       pbar.set_description(output_file)
-      if _process_image_files_batch(output_file, chunk_files, labels=chunk_labels, pbar=pbar):
+      if _process_image_files_batch(output_file, chunk_files, labels=chunk_labels, pbar=pbar, options=options):
         files.append(output_file)
   return files
 
@@ -346,7 +404,11 @@ def _process_dataset(filenames, output_directory, prefix, num_shards, labels=Non
   with Pool(processes=FLAGS.nprocs, initializer=_initializer, initargs=(tqdm.tqdm.get_lock(),)) as pool:
     time.sleep(2.0) # give tensorflow logging some time to quit spamming the console
     chunks = shards(list(range(num_shards)), FLAGS.nprocs)
-    pool.starmap(_process_shards, [(filenames, labels, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i) for i, chunk in enumerate(chunks)])
+    options = {
+        'resize': FLAGS.resize,
+        'crop_method': FLAGS.crop_method,
+    }
+    pool.starmap(_process_shards, [(filenames, labels, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i, options) for i, chunk in enumerate(chunks)])
 
 def convert_to_tf_records():
   """Convert the Imagenet dataset into TF-Record dumps."""
