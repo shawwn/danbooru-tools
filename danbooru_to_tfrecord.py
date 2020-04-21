@@ -175,14 +175,16 @@ def _is_cmyk(filename):
 class ImageCoder(object):
   """Helper class that provides TensorFlow image coding utilities."""
 
-  def __init__(self):
+  def __init__(self, options):
     # Create a single Session to run all image coding calls.
     self._sess = tf.Session()
 
     # Initializes function that converts PNG to JPEG data.
     self._png_data = tf.placeholder(dtype=tf.string)
     image = tf.io.decode_image(self._png_data, channels=3)
-    self._to_jpeg = tf.image.encode_jpeg(image, format='rgb', quality=100)
+    #image = _transform_image(image, target_image_shape=[FLAGS.resize, FLAGS.resize] if FLAGS.resize > 0 else None, crop_method=FLAGS.crop_method)
+    image = _transform_image(image, target_image_shape=[options["resize"], options["resize"]] if options["resize"] > 0 else None, crop_method=options["crop_method"])
+    self._to_jpeg = tf.image.encode_jpeg(tf.cast(image, tf.uint8), format='rgb', quality=100)
 
     # Initializes function that converts CMYK JPEG data to RGB JPEG data.
     self._cmyk_data = tf.placeholder(dtype=tf.string)
@@ -215,15 +217,15 @@ class ImageCoder(object):
 
 g_coder = None
 
-def get_coder():
+def get_coder(options):
   global g_coder
   if g_coder is None:
-    g_coder = ImageCoder()
+    g_coder = ImageCoder(options)
   return g_coder
 
-def _initializer(lock):
+def _initializer(lock, options):
   tqdm.tqdm.set_lock(lock)
-  get_coder()
+  get_coder(options)
 
 def _transform_image(image, target_image_shape=None, crop_method="random", image_channels=3, seed=None):
   """Preprocesses ImageNet images to have a target image shape.
@@ -293,9 +295,9 @@ def _process_image(filename, coder, options):
   # Decode the RGB JPEG.
   image = coder.decode_jpeg(image_data)
 
-  image = _transform_image(image, target_image_shape=[options["resize"], options["resize"]] if options["resize"] > 0 else None, crop_method=options["crop_method"])
+  #image = _transform_image(image, target_image_shape=[options["resize"], options["resize"]] if options["resize"] > 0 else None, crop_method=options["crop_method"])
   if options["crop_method"] != "none" or options["resize"] > 0:
-    image_data = coder._sess.run(tf.image.encode_jpeg(tf.cast(image, dtype=tf.uint8), format='rgb', quality=100))
+    image_data = coder.to_jpeg(image_data)
 
   # Check that image converted to RGB
   assert len(image.shape) == 3
@@ -317,7 +319,7 @@ def _process_image_files_batch(output_file, filenames, labels=None, pbar=None, c
   writer = None
 
   if coder is None:
-    coder = get_coder()
+    coder = get_coder(options)
 
   if labels is None:
     labels = [0 for _ in range(len(filenames))]
@@ -401,13 +403,14 @@ def _process_dataset(filenames, output_directory, prefix, num_shards, labels=Non
       for label in labels:
         f.write('{}\n'.format(label))
 
-  with Pool(processes=FLAGS.nprocs, initializer=_initializer, initargs=(tqdm.tqdm.get_lock(),)) as pool:
+  options = {
+      'resize': FLAGS.resize,
+      'crop_method': FLAGS.crop_method,
+  }
+
+  with Pool(processes=FLAGS.nprocs, initializer=_initializer, initargs=(tqdm.tqdm.get_lock(),options,)) as pool:
     time.sleep(2.0) # give tensorflow logging some time to quit spamming the console
     chunks = shards(list(range(num_shards)), FLAGS.nprocs)
-    options = {
-        'resize': FLAGS.resize,
-        'crop_method': FLAGS.crop_method,
-    }
     pool.starmap(_process_shards, [(filenames, labels, output_directory, prefix, chunk, num_shards, FLAGS.nprocs, i, options) for i, chunk in enumerate(chunks)])
 
 def convert_to_tf_records():
