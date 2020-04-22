@@ -137,7 +137,7 @@ def _convert_to_example(filename, image_buffer, label, embedding, synset, height
       'image/class/embedding': _float_feature(embedding),
       'image/class/synset': _bytes_feature(synset),
       'image/format': _bytes_feature(image_format),
-      'image/filename': _bytes_feature(os.path.basename(filename)),
+      'image/filename': _bytes_feature(filename),
       'image/encoded': _bytes_feature(image_buffer)}))
   return example
 
