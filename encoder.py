@@ -6,7 +6,7 @@ from functools import lru_cache
 import ftfy
 import regex as re
 
-__dirname = os.path.dirname(os.path.abspath(__file__))
+DIRNAME = os.path.dirname(os.path.abspath(__file__))
 
 @lru_cache()
 def bytes_to_unicode():
@@ -56,7 +56,7 @@ def whitespace_clean(text):
 
 
 class SimpleTokenizer(object):
-    def __init__(self, bpe_path: str = os.path.join(__dirname, "bpe_simple_vocab_16e6.txt.gz")):
+    def __init__(self, bpe_path: str = os.path.join(DIRNAME, "bpe_simple_vocab_16e6.txt.gz")):
         self.byte_encoder = bytes_to_unicode()
         self.byte_decoder = {v: k for k, v in self.byte_encoder.items()}
         merges = gzip.open(bpe_path).read().decode("utf-8").split('\n')
