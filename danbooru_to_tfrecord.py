@@ -71,7 +71,7 @@ flags.DEFINE_list(
 flags.DEFINE_string(
     'files', None, 'Name of a file that specifies the images in the dataset, one per line. E.g. --files my_list_of_images.txt')
 flags.DEFINE_integer(
-    'shards', 2048, 'Number of tfrecord files to generate')
+    'shards', 1024, 'Number of tfrecord files to generate')
 flags.DEFINE_integer(
     'nprocs', 8, 'Number of processes to work in parallel')
 flags.DEFINE_boolean(
